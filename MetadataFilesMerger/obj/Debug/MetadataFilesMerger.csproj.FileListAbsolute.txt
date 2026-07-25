@@ -1,0 +1,10 @@
+C:\Dev\MetadataFilesMerger\MetadataFilesMerger\bin\Debug\MetadataFilesMerger.exe.config
+C:\Dev\MetadataFilesMerger\MetadataFilesMerger\bin\Debug\MetadataFilesMerger.exe
+C:\Dev\MetadataFilesMerger\MetadataFilesMerger\bin\Debug\MetadataFilesMerger.pdb
+C:\Dev\MetadataFilesMerger\MetadataFilesMerger\obj\Debug\MetadataFilesMerger.csproj.AssemblyReference.cache
+C:\Dev\MetadataFilesMerger\MetadataFilesMerger\obj\Debug\MetadataFilesMerger.csproj.CoreCompileInputs.cache
+C:\Dev\MetadataFilesMerger\MetadataFilesMerger\obj\Debug\MetadataFilesMerger.exe
+C:\Dev\MetadataFilesMerger\MetadataFilesMerger\obj\Debug\MetadataFilesMerger.pdb
+C:\Dev\MetadataFilesMerger\MetadataFilesMerger\bin\DebugVerify\MetadataFilesMerger.exe.config
+C:\Dev\MetadataFilesMerger\MetadataFilesMerger\bin\DebugVerify\MetadataFilesMerger.exe
+C:\Dev\MetadataFilesMerger\MetadataFilesMerger\bin\DebugVerify\MetadataFilesMerger.pdb
