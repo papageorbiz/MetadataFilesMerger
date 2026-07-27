@@ -154,16 +154,21 @@ namespace MetadataFilesMerger
                     changed = true;
                 }
             }
-            primaryJson["FiledInFolders"] = paths.ToArray();
+            List<object> folderInfo = null;
             if (primaryJson.ContainsKey("FiledInFoldersInfo") || addedPaths.Count > 0)
             {
-                bool sanitized;
-                primaryJson["FiledInFoldersInfo"] = MergeFolderInfo(
-                    primaryJson,
-                    addedPaths,
-                    out sanitized).ToArray();
-                changed = changed || sanitized;
+                folderInfo = MergeFolderInfo(primaryJson, addedPaths);
+                primaryJson["FiledInFoldersInfo"] = folderInfo.ToArray();
             }
+
+            Dictionary<string, string[]> knownPathParts = BuildKnownPathParts(folderInfo);
+            bool pathsSanitized;
+            paths = SanitizeFiledInFolders(paths, knownPathParts, out pathsSanitized);
+            primaryJson["FiledInFolders"] = paths.ToArray();
+            changed = changed || pathsSanitized;
+
+            if (folderInfo != null)
+                changed = SanitizeFolderInfo(folderInfo) || changed;
 
             if (!changed)
             {
@@ -407,8 +412,7 @@ namespace MetadataFilesMerger
 
         private List<object> MergeFolderInfo(
             Dictionary<string, object> root,
-            IEnumerable<string> addedPaths,
-            out bool sanitized)
+            IEnumerable<string> addedPaths)
         {
             object value;
             object[] array;
@@ -456,11 +460,65 @@ namespace MetadataFilesMerger
                 });
             }
 
-            sanitized = SanitizeFolderInfoPaths(result);
             return result;
         }
 
-        private static bool SanitizeFolderInfoPaths(IEnumerable<object> folderInfo)
+        private static Dictionary<string, string[]> BuildKnownPathParts(IEnumerable<object> folderInfo)
+        {
+            Dictionary<string, string[]> result = new Dictionary<string, string[]>(StringComparer.Ordinal);
+            if (folderInfo == null)
+                return result;
+
+            foreach (object item in folderInfo)
+            {
+                Dictionary<string, object> info = item as Dictionary<string, object>;
+                object fullPathValue;
+                object pathPartsValue;
+                object[] rawParts;
+                if (info == null ||
+                    !info.TryGetValue("FullPath", out fullPathValue) || !(fullPathValue is string) ||
+                    !info.TryGetValue("PathParts", out pathPartsValue) ||
+                    (rawParts = pathPartsValue as object[]) == null)
+                    continue;
+
+                string fullPath = NormalizePath((string)fullPathValue);
+                string[] parts = rawParts.Select(part => part as string)
+                    .Where(part => !String.IsNullOrWhiteSpace(part))
+                    .Select(part => part.Trim())
+                    .ToArray();
+                if (fullPath.Length > 0 && parts.Length > 0 && !result.ContainsKey(fullPath))
+                    result.Add(fullPath, parts);
+            }
+            return result;
+        }
+
+        private List<string> SanitizeFiledInFolders(
+            IEnumerable<string> paths,
+            IDictionary<string, string[]> knownPathParts,
+            out bool changed)
+        {
+            changed = false;
+            List<string> result = new List<string>();
+            HashSet<string> unique = new HashSet<string>(StringComparer.Ordinal);
+            foreach (string path in paths)
+            {
+                string normalizedPath = NormalizePath(path);
+                string[] pathParts;
+                if (!knownPathParts.TryGetValue(normalizedPath, out pathParts))
+                    pathParts = _folderNameModel.Decompose(normalizedPath);
+
+                string sanitizedPath = String.Join("/", pathParts.Select(SanitizeFolderName));
+                if (!String.Equals(path, sanitizedPath, StringComparison.Ordinal))
+                    changed = true;
+                if (sanitizedPath.Length > 0 && unique.Add(sanitizedPath))
+                    result.Add(sanitizedPath);
+                else if (sanitizedPath.Length > 0)
+                    changed = true;
+            }
+            return result;
+        }
+
+        private bool SanitizeFolderInfo(IEnumerable<object> folderInfo)
         {
             bool changed = false;
             foreach (object item in folderInfo)
@@ -469,11 +527,36 @@ namespace MetadataFilesMerger
                 if (info == null)
                     continue;
 
-                object fullPathValue;
-                if (info.TryGetValue("FullPath", out fullPathValue) && fullPathValue is string)
+                object pathPartsValue;
+                object[] pathParts;
+                string[] originalParts = null;
+                if (info.TryGetValue("PathParts", out pathPartsValue) &&
+                    (pathParts = pathPartsValue as object[]) != null)
                 {
-                    string originalFullPath = (string)fullPathValue;
-                    string sanitizedFullPath = ReplacePathSeparators(originalFullPath);
+                    originalParts = pathParts.Select(part => part as string)
+                        .Where(part => !String.IsNullOrWhiteSpace(part))
+                        .Select(part => part.Trim())
+                        .ToArray();
+                }
+
+                object fullPathValue;
+                string originalFullPath = info.TryGetValue("FullPath", out fullPathValue)
+                    ? fullPathValue as string
+                    : null;
+                if ((originalParts == null || originalParts.Length == 0) &&
+                    !String.IsNullOrWhiteSpace(originalFullPath))
+                    originalParts = _folderNameModel.Decompose(originalFullPath);
+
+                if (originalParts != null && originalParts.Length > 0)
+                {
+                    string[] sanitizedParts = originalParts.Select(SanitizeFolderName).ToArray();
+                    if (!originalParts.SequenceEqual(sanitizedParts, StringComparer.Ordinal))
+                    {
+                        info["PathParts"] = sanitizedParts;
+                        changed = true;
+                    }
+
+                    string sanitizedFullPath = String.Join("/", sanitizedParts);
                     if (!String.Equals(originalFullPath, sanitizedFullPath, StringComparison.Ordinal))
                     {
                         info["FullPath"] = sanitizedFullPath;
@@ -481,28 +564,14 @@ namespace MetadataFilesMerger
                     }
                 }
 
-                object pathPartsValue;
-                object[] pathParts;
-                if (info.TryGetValue("PathParts", out pathPartsValue) &&
-                    (pathParts = pathPartsValue as object[]) != null)
+                object nameValue;
+                string originalName = info.TryGetValue("Name", out nameValue) ? nameValue as string : null;
+                if (originalName != null)
                 {
-                    object[] sanitizedParts = pathParts.ToArray();
-                    bool partsChanged = false;
-                    for (int index = 0; index < sanitizedParts.Length; index++)
+                    string sanitizedName = SanitizeFolderName(originalName);
+                    if (!String.Equals(originalName, sanitizedName, StringComparison.Ordinal))
                     {
-                        string originalPart = sanitizedParts[index] as string;
-                        if (originalPart == null)
-                            continue;
-                        string sanitizedPart = ReplacePathSeparators(originalPart);
-                        if (!String.Equals(originalPart, sanitizedPart, StringComparison.Ordinal))
-                        {
-                            sanitizedParts[index] = sanitizedPart;
-                            partsChanged = true;
-                        }
-                    }
-                    if (partsChanged)
-                    {
-                        info["PathParts"] = sanitizedParts;
+                        info["Name"] = sanitizedName;
                         changed = true;
                     }
                 }
@@ -510,9 +579,11 @@ namespace MetadataFilesMerger
             return changed;
         }
 
-        private static string ReplacePathSeparators(string value)
+        private static string SanitizeFolderName(string value)
         {
-            return (value ?? String.Empty).Replace('/', '_').Replace('\\', '_');
+            return (value ?? String.Empty)
+                .Replace('/', '_')
+                .Replace('\\', '_');
         }
 
         private static JavaScriptSerializer CreateSerializer()

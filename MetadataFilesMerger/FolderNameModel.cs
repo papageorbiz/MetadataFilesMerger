@@ -10,6 +10,7 @@ namespace MetadataFilesMerger
     {
         private const string Header = "# MetadataFilesMerger folder-name model v1";
         private readonly HashSet<string> _names;
+        private readonly HashSet<string> _slashNames;
         private readonly int _maximumSlashCount;
 
         private FolderNameModel(IEnumerable<string> names)
@@ -17,9 +18,12 @@ namespace MetadataFilesMerger
             _names = new HashSet<string>(
                 names.Select(NormalizeName).Where(x => x.Length > 0),
                 StringComparer.OrdinalIgnoreCase);
-            _maximumSlashCount = _names.Count == 0
+            _slashNames = new HashSet<string>(
+                _names.Where(name => name.IndexOf('/') >= 0),
+                StringComparer.OrdinalIgnoreCase);
+            _maximumSlashCount = _slashNames.Count == 0
                 ? 0
-                : _names.Max(name => name.Count(character => character == '/'));
+                : _slashNames.Max(name => name.Count(character => character == '/'));
         }
 
         public int Count { get { return _names.Count; } }
@@ -95,7 +99,7 @@ namespace MetadataFilesMerger
                 for (int end = lastCandidate; end > index; end--)
                 {
                     string candidate = String.Join("/", rawParts.Skip(index).Take(end - index + 1));
-                    if (_names.Contains(candidate))
+                    if (IsKnownNameOrVariation(candidate))
                     {
                         match = candidate;
                         matchEnd = end;
@@ -116,6 +120,51 @@ namespace MetadataFilesMerger
             }
 
             return result.ToArray();
+        }
+
+        private bool IsKnownNameOrVariation(string candidate)
+        {
+            if (_slashNames.Contains(candidate))
+                return true;
+
+            int firstSlash = candidate.IndexOf('/');
+            int lastSlash = candidate.LastIndexOf('/');
+            if (firstSlash < 0)
+                return false;
+
+            for (int start = 0; start <= firstSlash; start++)
+            {
+                if (!IsVariationStart(candidate, start))
+                    continue;
+                if (start > 0 && candidate.Substring(0, start).IndexOf('/') >= 0)
+                    continue;
+
+                for (int end = lastSlash + 1; end <= candidate.Length; end++)
+                {
+                    if (start == 0 && end == candidate.Length)
+                        continue;
+                    if (!IsVariationEnd(candidate, end))
+                        continue;
+                    if (end < candidate.Length && candidate.Substring(end).IndexOf('/') >= 0)
+                        continue;
+
+                    string root = candidate.Substring(start, end - start);
+                    if (root.Any(Char.IsLetter) && _slashNames.Contains(root))
+                        return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool IsVariationStart(string value, int index)
+        {
+            return index == 0 || !Char.IsLetterOrDigit(value[index - 1]);
+        }
+
+        private static bool IsVariationEnd(string value, int index)
+        {
+            return index == value.Length || !Char.IsLetterOrDigit(value[index]);
         }
 
         private static string NormalizeName(string value)
