@@ -28,6 +28,13 @@ namespace MetadataFilesMerger
         public string RelativePath { get; set; }
     }
 
+    internal sealed class MergeOutcome
+    {
+        public bool Changed { get; set; }
+        public int MergedEntryCount { get; set; }
+        public int DashFolderCount { get; set; }
+    }
+
     internal sealed class TrainingProgress
     {
         private long _processed;

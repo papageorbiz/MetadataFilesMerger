@@ -51,6 +51,7 @@
   <ItemGroup>
     <Compile Include="AppSettings.cs" />
     <Compile Include="ConsoleUi.cs" />
+    <Compile Include="DateLikeExpression.cs" />
     <Compile Include="FileMergeService.cs" />
     <Compile Include="FolderNameModel.cs" />
     <Compile Include="FolderNameTrainingService.cs" />

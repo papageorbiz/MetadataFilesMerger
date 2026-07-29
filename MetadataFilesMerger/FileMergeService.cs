@@ -2,7 +2,6 @@ using System;
 using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -15,25 +14,6 @@ namespace MetadataFilesMerger
     internal sealed class FileMergeService
     {
         private const string Prefix = "FiledInFolders:";
-        private static readonly string[] DateFormats =
-        {
-            "d/M/yyyy", "dd/MM/yyyy", "d/MM/yyyy", "dd/M/yyyy",
-            "M/d/yyyy", "MM/dd/yyyy", "M/dd/yyyy", "MM/d/yyyy",
-            "yyyy/M/d", "yyyy/MM/dd", "yyyy/M/dd", "yyyy/MM/d",
-            "d/M/yy", "dd/MM/yy", "d/MM/yy", "dd/M/yy",
-            "M/d/yy", "MM/dd/yy", "M/dd/yy", "MM/d/yy",
-            "yy/M/d", "yy/MM/dd", "yy/M/dd", "yy/MM/d",
-            "d-M-yyyy", "dd-MM-yyyy", "d-MM-yyyy", "dd-M-yyyy",
-            "M-d-yyyy", "MM-dd-yyyy", "M-dd-yyyy", "MM-d-yyyy",
-            "yyyy-M-d", "yyyy-MM-dd", "yyyy-M-dd", "yyyy-MM-d",
-            "d-M-yy", "dd-MM-yy", "d-MM-yy", "dd-M-yy",
-            "M-d-yy", "MM-dd-yy", "M-dd-yy", "MM-d-yy",
-            "yy-M-d", "yy-MM-dd", "yy-M-dd", "yy-MM-d",
-            "d.M.yyyy", "dd.MM.yyyy", "d.MM.yyyy", "dd.M.yyyy",
-            "d.M.yy", "dd.MM.yy", "d.MM.yy", "dd.M.yy",
-            "yy.M.d", "yy.MM.dd", "yy.M.dd", "yy.MM.d",
-            "yyyy.M.d", "yyyy.MM.dd", "yyyy.M.dd", "yyyy.MM.d"
-        };
         private readonly AppSettings _settings;
         private readonly RunLogger _logger;
         private readonly FolderNameModel _folderNameModel;
@@ -94,10 +74,23 @@ namespace MetadataFilesMerger
                 {
                     try
                     {
-                        bool changed = MergeOne(item);
-                        statistics.Added(changed);
-                        if (changed)
+                        MergeOutcome outcome = MergeOne(item);
+                        statistics.Added(outcome.Changed);
+                        if (outcome.Changed)
                             _logger.Info(item.PrimaryPath, "Merge successful: folder metadata was updated.");
+                        try
+                        {
+                            _logger.SednaMerge(
+                                Path.Combine(_settings.SecondaryFolder, item.RelativePath),
+                                outcome.MergedEntryCount);
+                            _logger.DashReplacement(
+                                Path.Combine(_settings.OutputFolder, item.RelativePath),
+                                outcome.DashFolderCount);
+                        }
+                        catch (Exception auditException)
+                        {
+                            _logger.Error(item.RelativePath, "Could not update a daily audit log.", auditException);
+                        }
                     }
                     catch (Exception ex)
                     {
@@ -109,8 +102,9 @@ namespace MetadataFilesMerger
             catch (OperationCanceledException) { }
         }
 
-        private bool MergeOne(WorkItem item)
+        private MergeOutcome MergeOne(WorkItem item)
         {
+            MergeOutcome outcome = new MergeOutcome();
             string destination = Path.Combine(_settings.OutputFolder, item.RelativePath);
             string sourceEml = Path.ChangeExtension(item.PrimaryPath, ".eml");
             string destinationEml = Path.ChangeExtension(destination, ".eml");
@@ -122,7 +116,7 @@ namespace MetadataFilesMerger
             if (File.Exists(destination))
             {
                 CopyAtomically(sourceEml, destinationEml);
-                return false;
+                return outcome;
             }
 
             string secondary = Path.Combine(_settings.SecondaryFolder, item.RelativePath);
@@ -162,19 +156,24 @@ namespace MetadataFilesMerger
             }
 
             Dictionary<string, string[]> knownPathParts = BuildKnownPathParts(folderInfo);
+            HashSet<string> foldersRequiringDash = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             bool pathsSanitized;
-            paths = SanitizeFiledInFolders(paths, knownPathParts, out pathsSanitized);
+            paths = SanitizeFiledInFolders(
+                paths,
+                knownPathParts,
+                foldersRequiringDash,
+                out pathsSanitized);
             primaryJson["FiledInFolders"] = paths.ToArray();
             changed = changed || pathsSanitized;
 
             if (folderInfo != null)
-                changed = SanitizeFolderInfo(folderInfo) || changed;
+                changed = SanitizeFolderInfo(folderInfo, foldersRequiringDash) || changed;
 
             if (!changed)
             {
                 CopyAtomically(sourceEml, destinationEml);
                 CopyAtomically(item.PrimaryPath, destination);
-                return false;
+                return outcome;
             }
 
             string directory = Path.GetDirectoryName(destination);
@@ -192,7 +191,10 @@ namespace MetadataFilesMerger
             {
                 if (File.Exists(temporary)) File.Delete(temporary);
             }
-            return changed;
+            outcome.Changed = changed;
+            outcome.MergedEntryCount = addedPaths.Count;
+            outcome.DashFolderCount = foldersRequiringDash.Count;
+            return outcome;
         }
 
         private static void CopyAtomically(string source, string destination)
@@ -344,30 +346,7 @@ namespace MetadataFilesMerger
 
         private static bool IsDateExpression(string value)
         {
-            if (String.IsNullOrWhiteSpace(value))
-                return false;
-
-            string candidate = value.Trim();
-            if (!candidate.Any(Char.IsDigit))
-                return false;
-
-            if (IsNumericSlashDateExpression(candidate))
-                return true;
-
-            DateTime ignored;
-            return DateTime.TryParseExact(
-                candidate,
-                DateFormats,
-                CultureInfo.InvariantCulture,
-                DateTimeStyles.None,
-                out ignored);
-        }
-
-        private static bool IsNumericSlashDateExpression(string value)
-        {
-            string[] parts = value.Split('/');
-            return parts.Length == 3 &&
-                parts.All(part => part.Length > 0 && part.Length <= 4 && part.All(Char.IsDigit));
+            return DateLikeExpression.IsDateExpression(value);
         }
 
         private static bool WildcardMatch(string value, string pattern)
@@ -486,7 +465,11 @@ namespace MetadataFilesMerger
                     .Where(part => !String.IsNullOrWhiteSpace(part))
                     .Select(part => part.Trim())
                     .ToArray();
-                if (fullPath.Length > 0 && parts.Length > 0 && !result.ContainsKey(fullPath))
+                if (fullPath.Length > 0 &&
+                    parts.Length > 0 &&
+                    PathPartsMatchFullPath(parts, fullPath) &&
+                    !FolderNameModel.ContainsSplitDateLikeExpression(parts) &&
+                    !result.ContainsKey(fullPath))
                     result.Add(fullPath, parts);
             }
             return result;
@@ -495,6 +478,7 @@ namespace MetadataFilesMerger
         private List<string> SanitizeFiledInFolders(
             IEnumerable<string> paths,
             IDictionary<string, string[]> knownPathParts,
+            ISet<string> foldersRequiringDash,
             out bool changed)
         {
             changed = false;
@@ -507,6 +491,8 @@ namespace MetadataFilesMerger
                 if (!knownPathParts.TryGetValue(normalizedPath, out pathParts))
                     pathParts = _folderNameModel.Decompose(normalizedPath);
 
+                foreach (string pathPart in pathParts)
+                    TrackFolderRequiringDash(pathPart, foldersRequiringDash);
                 string sanitizedPath = String.Join("/", pathParts.Select(SanitizeFolderName));
                 if (!String.Equals(path, sanitizedPath, StringComparison.Ordinal))
                     changed = true;
@@ -518,7 +504,9 @@ namespace MetadataFilesMerger
             return result;
         }
 
-        private bool SanitizeFolderInfo(IEnumerable<object> folderInfo)
+        private bool SanitizeFolderInfo(
+            IEnumerable<object> folderInfo,
+            ISet<string> foldersRequiringDash)
         {
             bool changed = false;
             foreach (object item in folderInfo)
@@ -530,6 +518,7 @@ namespace MetadataFilesMerger
                 object pathPartsValue;
                 object[] pathParts;
                 string[] originalParts = null;
+                bool pathPartsRecalculated = false;
                 if (info.TryGetValue("PathParts", out pathPartsValue) &&
                     (pathParts = pathPartsValue as object[]) != null)
                 {
@@ -543,14 +532,29 @@ namespace MetadataFilesMerger
                 string originalFullPath = info.TryGetValue("FullPath", out fullPathValue)
                     ? fullPathValue as string
                     : null;
+                if (originalParts != null &&
+                    originalParts.Length > 0 &&
+                    ((!String.IsNullOrWhiteSpace(originalFullPath) &&
+                    !PathPartsMatchFullPath(originalParts, originalFullPath)) ||
+                    FolderNameModel.ContainsSplitDateLikeExpression(originalParts)))
+                {
+                    originalParts = null;
+                    pathPartsRecalculated = true;
+                }
                 if ((originalParts == null || originalParts.Length == 0) &&
                     !String.IsNullOrWhiteSpace(originalFullPath))
+                {
                     originalParts = _folderNameModel.Decompose(originalFullPath);
+                    pathPartsRecalculated = true;
+                }
 
                 if (originalParts != null && originalParts.Length > 0)
                 {
+                    foreach (string originalPart in originalParts)
+                        TrackFolderRequiringDash(originalPart, foldersRequiringDash);
                     string[] sanitizedParts = originalParts.Select(SanitizeFolderName).ToArray();
-                    if (!originalParts.SequenceEqual(sanitizedParts, StringComparer.Ordinal))
+                    if (pathPartsRecalculated ||
+                        !originalParts.SequenceEqual(sanitizedParts, StringComparer.Ordinal))
                     {
                         info["PathParts"] = sanitizedParts;
                         changed = true;
@@ -568,6 +572,7 @@ namespace MetadataFilesMerger
                 string originalName = info.TryGetValue("Name", out nameValue) ? nameValue as string : null;
                 if (originalName != null)
                 {
+                    TrackFolderRequiringDash(originalName, foldersRequiringDash);
                     string sanitizedName = SanitizeFolderName(originalName);
                     if (!String.Equals(originalName, sanitizedName, StringComparison.Ordinal))
                     {
@@ -579,11 +584,27 @@ namespace MetadataFilesMerger
             return changed;
         }
 
+        private static void TrackFolderRequiringDash(string folderName, ISet<string> affectedFolders)
+        {
+            if (!String.IsNullOrEmpty(folderName) &&
+                (folderName.IndexOf('/') >= 0 || folderName.IndexOf('\\') >= 0))
+                affectedFolders.Add(folderName);
+        }
+
         private static string SanitizeFolderName(string value)
         {
             return (value ?? String.Empty)
-                .Replace('/', '_')
-                .Replace('\\', '_');
+                .Replace('_', '-')
+                .Replace('/', '-')
+                .Replace('\\', '-');
+        }
+
+        private static bool PathPartsMatchFullPath(IEnumerable<string> pathParts, string fullPath)
+        {
+            return String.Equals(
+                String.Join("/", pathParts),
+                NormalizePath(fullPath),
+                StringComparison.Ordinal);
         }
 
         private static JavaScriptSerializer CreateSerializer()

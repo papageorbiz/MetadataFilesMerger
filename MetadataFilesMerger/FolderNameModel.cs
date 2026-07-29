@@ -83,6 +83,8 @@ namespace MetadataFilesMerger
                 .Where(part => part.Length > 0)
                 .ToArray();
 
+            rawParts = MergeDateLikeParts(rawParts);
+
             if (_maximumSlashCount == 0 || rawParts.Length < 2)
                 return rawParts;
 
@@ -122,6 +124,76 @@ namespace MetadataFilesMerger
             return result.ToArray();
         }
 
+        private static string[] MergeDateLikeParts(string[] rawParts)
+        {
+            if (rawParts.Length < 2)
+                return rawParts;
+
+            List<string> result = new List<string>();
+            int index = 0;
+            while (index < rawParts.Length)
+            {
+                string match = null;
+                int matchEnd = index;
+                for (int end = rawParts.Length - 1; ShouldTryDateLikeMergePrefix(rawParts[index]) && end > index; end--)
+                {
+                    string candidate = String.Join("/", rawParts.Skip(index).Take(end - index + 1));
+                    if (DateLikeExpression.StartsSlashSeparatedDateExpression(candidate))
+                    {
+                        match = candidate;
+                        matchEnd = end;
+                        break;
+                    }
+                }
+
+                if (match == null)
+                {
+                    result.Add(rawParts[index]);
+                    index++;
+                }
+                else
+                {
+                    result.Add(match);
+                    index = matchEnd + 1;
+                }
+            }
+
+            return result.ToArray();
+        }
+
+        public static bool ContainsSplitDateLikeExpression(string[] rawParts)
+        {
+            if (rawParts == null || rawParts.Length < 2)
+                return false;
+
+            return MergeDateLikeParts(rawParts).Length < rawParts.Length;
+        }
+
+        private static bool ShouldTryDateLikeMergePrefix(string value)
+        {
+            if (String.IsNullOrWhiteSpace(value))
+                return false;
+
+            return value.Any(Char.IsDigit) ||
+                (value.Any(Char.IsWhiteSpace) && !IsUppercaseLabel(value)) ||
+                value.Length <= 6;
+        }
+
+        private static bool IsUppercaseLabel(string value)
+        {
+            bool hasLetter = false;
+            foreach (char character in value)
+            {
+                if (!Char.IsLetter(character))
+                    continue;
+
+                hasLetter = true;
+                if (Char.IsLower(character))
+                    return false;
+            }
+            return hasLetter;
+        }
+
         private bool IsKnownNameOrVariation(string candidate)
         {
             if (_slashNames.Contains(candidate))
@@ -159,12 +231,17 @@ namespace MetadataFilesMerger
 
         private static bool IsVariationStart(string value, int index)
         {
-            return index == 0 || !Char.IsLetterOrDigit(value[index - 1]);
+            return index == 0 || IsVariationBoundary(value[index - 1]);
         }
 
         private static bool IsVariationEnd(string value, int index)
         {
-            return index == value.Length || !Char.IsLetterOrDigit(value[index]);
+            return index == value.Length || IsVariationBoundary(value[index]);
+        }
+
+        private static bool IsVariationBoundary(char value)
+        {
+            return Char.IsWhiteSpace(value) || ",;:()[]{}".IndexOf(value) >= 0;
         }
 
         private static string NormalizeName(string value)
