@@ -17,6 +17,7 @@ namespace MetadataFilesMerger
             LogPath = Path.Combine(logDirectory, "merge-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".log");
             _writer = new StreamWriter(LogPath, false, new UTF8Encoding(false), 65536);
             _writer.AutoFlush = true;
+            EnsureDailyAuditLogs();
             Info(null, "Run started");
         }
 
@@ -49,6 +50,29 @@ namespace MetadataFilesMerger
                 affectedFolders);
         }
 
+        public void PathIdentification(string fileName, string fullPath, string source)
+        {
+            lock (_sync)
+            {
+                string path = Path.Combine(Path.GetDirectoryName(LogPath), "path-identification-" + DateTime.Now.ToString("ddMMyyyy") + ".log");
+                EnsureTsvLogHeader(path, "Timestamp\tLevel\tEvent\tFile\tSource\tFullPath");
+                using (StreamWriter writer = new StreamWriter(path, true, new UTF8Encoding(false)))
+                {
+                    writer.Write(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"));
+                    writer.Write('\t');
+                    writer.Write("INFO");
+                    writer.Write('\t');
+                    writer.Write("PathIdentification");
+                    writer.Write('\t');
+                    writer.Write(EscapeTabValue(fileName));
+                    writer.Write('\t');
+                    writer.Write(EscapeTabValue(source));
+                    writer.Write('\t');
+                    writer.WriteLine(EscapeTabValue(fullPath));
+                }
+            }
+        }
+
         private void Write(string level, string file, string message, Exception ex)
         {
             lock (_sync)
@@ -72,28 +96,54 @@ namespace MetadataFilesMerger
             lock (_sync)
             {
                 string path = Path.Combine(Path.GetDirectoryName(LogPath), logName);
+                EnsureTsvLogHeader(path, "Timestamp\tLevel\tEvent\tFile\t" + countLabel);
                 using (StreamWriter writer = new StreamWriter(path, true, new UTF8Encoding(false)))
                 {
                     writer.Write(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"));
-                    writer.Write(" [");
+                    writer.Write('\t');
                     writer.Write(level);
-                    writer.Write("] Event=");
+                    writer.Write('\t');
                     writer.Write(eventName);
-                    writer.Write(" | File=\"");
-                    writer.Write(EscapeLogValue(fileName));
-                    writer.Write("\" | ");
-                    writer.Write(countLabel);
-                    writer.Write('=');
+                    writer.Write('\t');
+                    writer.Write(EscapeTabValue(fileName));
+                    writer.Write('\t');
                     writer.WriteLine(count);
                 }
             }
         }
 
-        private static string EscapeLogValue(string value)
+        private void EnsureDailyAuditLogs()
+        {
+            lock (_sync)
+            {
+                string directory = Path.GetDirectoryName(LogPath);
+                EnsureTsvLogHeader(
+                    Path.Combine(directory, "sedna-" + DateTime.Now.ToString("ddMMyyyy") + ".log"),
+                    "Timestamp\tLevel\tEvent\tFile\tMergedEntries");
+                EnsureTsvLogHeader(
+                    Path.Combine(directory, "dash-" + DateTime.Now.ToString("ddMMyyyy") + ".log"),
+                    "Timestamp\tLevel\tEvent\tFile\tFoldersRequiringDash");
+                EnsureTsvLogHeader(
+                    Path.Combine(directory, "path-identification-" + DateTime.Now.ToString("ddMMyyyy") + ".log"),
+                    "Timestamp\tLevel\tEvent\tFile\tSource\tFullPath");
+            }
+        }
+
+        private static void EnsureTsvLogHeader(string path, string header)
+        {
+            FileInfo file = new FileInfo(path);
+            if (file.Exists && file.Length > 0)
+                return;
+
+            using (StreamWriter writer = new StreamWriter(path, false, new UTF8Encoding(false)))
+                writer.WriteLine(header);
+        }
+
+        private static string EscapeTabValue(string value)
         {
             return (value ?? String.Empty)
                 .Replace("\\", "\\\\")
-                .Replace("\"", "\\\"")
+                .Replace("\t", "\\t")
                 .Replace("\r", "\\r")
                 .Replace("\n", "\\n");
         }

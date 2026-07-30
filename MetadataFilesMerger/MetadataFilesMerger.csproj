@@ -53,10 +53,15 @@
     <Compile Include="ConsoleUi.cs" />
     <Compile Include="DateLikeExpression.cs" />
     <Compile Include="FileMergeService.cs" />
+    <Compile Include="FolderHierarchyExportService.cs" />
+    <Compile Include="FolderNameSanitizer.cs" />
+    <Compile Include="FolderPathLookup.cs" />
+    <Compile Include="FolderPathResolver.cs" />
     <Compile Include="FolderNameModel.cs" />
     <Compile Include="FolderNameTrainingService.cs" />
     <Compile Include="Models.cs" />
     <Compile Include="RunLogger.cs" />
+    <Compile Include="SecondaryPathParser.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>

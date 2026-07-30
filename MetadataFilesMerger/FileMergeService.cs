@@ -16,15 +16,15 @@ namespace MetadataFilesMerger
         private const string Prefix = "FiledInFolders:";
         private readonly AppSettings _settings;
         private readonly RunLogger _logger;
-        private readonly FolderNameModel _folderNameModel;
+        private readonly FolderPathResolver _folderPathResolver;
+        private readonly SecondaryPathParser _secondaryPathParser;
 
         public FileMergeService(AppSettings settings, RunLogger logger)
         {
             _settings = settings;
             _logger = logger;
-            _folderNameModel = settings.FolderNameTrainingEnabled
-                ? FolderNameModel.Load(settings.FolderNameModelPath)
-                : FolderNameModel.Empty();
+            _folderPathResolver = new FolderPathResolver(settings, logger);
+            _secondaryPathParser = new SecondaryPathParser(settings);
         }
 
         public MergeStatistics Run(CancellationToken cancellation)
@@ -45,9 +45,6 @@ namespace MetadataFilesMerger
                         if (cancellation.IsCancellationRequested) break;
                         statistics.Found();
                         string relative = GetRelativePath(_settings.PrimaryFolder, file);
-                        string output = Path.Combine(_settings.OutputFolder, relative);
-                        string emlOutput = Path.ChangeExtension(output, ".eml");
-                        if (File.Exists(output) && File.Exists(emlOutput)) { statistics.Skip(); continue; }
                         queue.Add(new WorkItem { PrimaryPath = file, RelativePath = relative }, cancellation);
                     }
                 }
@@ -111,14 +108,6 @@ namespace MetadataFilesMerger
             if (!File.Exists(sourceEml))
                 throw new FileNotFoundException("Matching primary EML file was not found.", sourceEml);
 
-            // A previous version/run may already have produced the JSON. Repair its
-            // missing EML without rewriting the completed merged document.
-            if (File.Exists(destination))
-            {
-                CopyAtomically(sourceEml, destinationEml);
-                return outcome;
-            }
-
             string secondary = Path.Combine(_settings.SecondaryFolder, item.RelativePath);
             if (!File.Exists(secondary))
                 throw new FileNotFoundException("Matching secondary file was not found.", secondary);
@@ -157,11 +146,14 @@ namespace MetadataFilesMerger
 
             Dictionary<string, string[]> knownPathParts = BuildKnownPathParts(folderInfo);
             HashSet<string> foldersRequiringDash = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            HashSet<string> addedPathSet = new HashSet<string>(addedPaths, StringComparer.Ordinal);
             bool pathsSanitized;
             paths = SanitizeFiledInFolders(
                 paths,
                 knownPathParts,
                 foldersRequiringDash,
+                item.RelativePath,
+                addedPathSet,
                 out pathsSanitized);
             primaryJson["FiledInFolders"] = paths.ToArray();
             changed = changed || pathsSanitized;
@@ -181,11 +173,13 @@ namespace MetadataFilesMerger
             string temporary = destination + "." + Guid.NewGuid().ToString("N") + ".tmp";
             try
             {
-                // Copy the companion first. The JSON is the completion marker used
-                // by resume logic, so a stopped run can never skip a missing EML.
+                // Copy the companion first so the JSON remains the final completed artifact.
                 CopyAtomically(sourceEml, destinationEml);
                 File.WriteAllText(temporary, serializer.Serialize(primaryJson), new UTF8Encoding(false));
-                File.Move(temporary, destination);
+                if (File.Exists(destination))
+                    File.Replace(temporary, destination, null);
+                else
+                    File.Move(temporary, destination);
             }
             finally
             {
@@ -232,97 +226,10 @@ namespace MetadataFilesMerger
                 if (comment == null || !comment.TryGetValue("value", out raw)) continue;
                 string text = raw as string;
                 if (text == null || !text.TrimStart().StartsWith(Prefix, StringComparison.OrdinalIgnoreCase)) continue;
-                int colon = text.IndexOf(':');
-                foreach (string path in ParseSecondaryPaths(text.Substring(colon + 1)))
+                foreach (string path in _secondaryPathParser.Parse(text))
                     result.Add(path);
             }
             return result;
-        }
-
-        private IEnumerable<string> ParseSecondaryPaths(string value)
-        {
-            string currentPath = null;
-            foreach (CommaFragment commaFragment in SplitCommaFragments(value))
-            {
-                string fragment = NormalizePath(commaFragment.Value);
-                if (fragment.Length == 0) continue;
-
-                if (IsSecondaryPathStart(fragment))
-                {
-                    if (!String.IsNullOrEmpty(currentPath))
-                        yield return currentPath;
-                    currentPath = fragment;
-                }
-                else if (!String.IsNullOrEmpty(currentPath))
-                {
-                    // A fragment without a slash, or a standalone date-like fragment
-                    // such as 01/01/2020, is part of the preceding path; the comma is
-                    // path content rather than a path separator. Preserve the original
-                    // comma spacing so values such as 15,000 are not changed to 15, 000.
-                    currentPath += commaFragment.Separator + fragment;
-                }
-            }
-
-            if (!String.IsNullOrEmpty(currentPath))
-                yield return currentPath;
-        }
-
-        private bool IsSecondaryPathStart(string fragment)
-        {
-            if (IsDateExpression(fragment))
-                return false;
-
-            if (IsCabinetPath(fragment))
-                return true;
-
-            return IsFolderStartTemplate(fragment);
-        }
-
-        private static string GetFirstPathSegment(string path)
-        {
-            string normalized = NormalizePath(path);
-            int slash = normalized.IndexOf('/');
-            return slash >= 0 ? normalized.Substring(0, slash).Trim() : normalized;
-        }
-
-        private static bool IsCabinetPath(string path)
-        {
-            return String.Equals(GetFirstPathSegment(path), "Cabinet", StringComparison.OrdinalIgnoreCase);
-        }
-
-        private static IEnumerable<CommaFragment> SplitCommaFragments(string value)
-        {
-            if (value == null)
-                yield break;
-
-            int start = 0;
-            string separator = String.Empty;
-            for (int i = 0; i < value.Length; i++)
-            {
-                if (value[i] != ',')
-                    continue;
-
-                yield return new CommaFragment(separator, value.Substring(start, i - start));
-
-                int nextStart = i + 1;
-                while (nextStart < value.Length && Char.IsWhiteSpace(value[nextStart]))
-                    nextStart++;
-
-                separator = value.Substring(i, nextStart - i);
-                start = nextStart;
-                i = nextStart - 1;
-            }
-
-            yield return new CommaFragment(separator, value.Substring(start));
-        }
-
-        private bool IsFolderStartTemplate(string value)
-        {
-            string firstSegment = GetFirstPathSegment(value);
-            foreach (string pattern in _settings.FolderStartPatterns)
-                if (WildcardMatch(value, pattern) || WildcardMatch(firstSegment, pattern))
-                    return true;
-            return false;
         }
 
         private bool IsTemplateMatchingPath(string path)
@@ -342,11 +249,6 @@ namespace MetadataFilesMerger
                     return true;
             }
             return false;
-        }
-
-        private static bool IsDateExpression(string value)
-        {
-            return DateLikeExpression.IsDateExpression(value);
         }
 
         private static bool WildcardMatch(string value, string pattern)
@@ -428,7 +330,8 @@ namespace MetadataFilesMerger
                 if (fullPath.Length == 0 || !existingFullPaths.Add(fullPath))
                     continue;
 
-                string[] pathParts = _folderNameModel.Decompose(fullPath);
+                ResolvedPathParts resolved = ResolvePathParts(fullPath);
+                string[] pathParts = resolved.Parts;
 
                 result.Add(new Dictionary<string, object>
                 {
@@ -479,6 +382,8 @@ namespace MetadataFilesMerger
             IEnumerable<string> paths,
             IDictionary<string, string[]> knownPathParts,
             ISet<string> foldersRequiringDash,
+            string relativeFile,
+            ISet<string> addedPaths,
             out bool changed)
         {
             changed = false;
@@ -488,12 +393,32 @@ namespace MetadataFilesMerger
             {
                 string normalizedPath = NormalizePath(path);
                 string[] pathParts;
-                if (!knownPathParts.TryGetValue(normalizedPath, out pathParts))
-                    pathParts = _folderNameModel.Decompose(normalizedPath);
+                ResolvedPathParts resolved = null;
+                bool isAddedPath = addedPaths.Contains(normalizedPath);
+                if (isAddedPath || !knownPathParts.TryGetValue(normalizedPath, out pathParts))
+                {
+                    resolved = ResolvePathParts(normalizedPath);
+                    pathParts = resolved.Parts;
+                }
+                else
+                {
+                    resolved = ResolvePathParts(normalizedPath);
+                    if (String.Equals(resolved.Source, "Lookup Table", StringComparison.Ordinal))
+                    {
+                        pathParts = resolved.Parts;
+                    }
+                    else
+                    {
+                        resolved = new ResolvedPathParts(pathParts, "Existing PathParts");
+                    }
+                }
+
+                if (isAddedPath)
+                    _logger.PathIdentification(relativeFile, normalizedPath, resolved.Source);
 
                 foreach (string pathPart in pathParts)
                     TrackFolderRequiringDash(pathPart, foldersRequiringDash);
-                string sanitizedPath = String.Join("/", pathParts.Select(SanitizeFolderName));
+                string sanitizedPath = FolderPathLookup.JoinPath(pathParts.Select(FolderNameSanitizer.Sanitize));
                 if (!String.Equals(path, sanitizedPath, StringComparison.Ordinal))
                     changed = true;
                 if (sanitizedPath.Length > 0 && unique.Add(sanitizedPath))
@@ -532,6 +457,9 @@ namespace MetadataFilesMerger
                 string originalFullPath = info.TryGetValue("FullPath", out fullPathValue)
                     ? fullPathValue as string
                     : null;
+                ResolvedPathParts resolvedOriginal = String.IsNullOrWhiteSpace(originalFullPath)
+                    ? null
+                    : ResolvePathParts(originalFullPath);
                 if (originalParts != null &&
                     originalParts.Length > 0 &&
                     ((!String.IsNullOrWhiteSpace(originalFullPath) &&
@@ -544,7 +472,13 @@ namespace MetadataFilesMerger
                 if ((originalParts == null || originalParts.Length == 0) &&
                     !String.IsNullOrWhiteSpace(originalFullPath))
                 {
-                    originalParts = _folderNameModel.Decompose(originalFullPath);
+                    originalParts = resolvedOriginal.Parts;
+                    pathPartsRecalculated = true;
+                }
+                else if (resolvedOriginal != null &&
+                    String.Equals(resolvedOriginal.Source, "Lookup Table", StringComparison.Ordinal))
+                {
+                    originalParts = resolvedOriginal.Parts;
                     pathPartsRecalculated = true;
                 }
 
@@ -552,7 +486,7 @@ namespace MetadataFilesMerger
                 {
                     foreach (string originalPart in originalParts)
                         TrackFolderRequiringDash(originalPart, foldersRequiringDash);
-                    string[] sanitizedParts = originalParts.Select(SanitizeFolderName).ToArray();
+                    string[] sanitizedParts = originalParts.Select(FolderNameSanitizer.Sanitize).ToArray();
                     if (pathPartsRecalculated ||
                         !originalParts.SequenceEqual(sanitizedParts, StringComparer.Ordinal))
                     {
@@ -573,7 +507,7 @@ namespace MetadataFilesMerger
                 if (originalName != null)
                 {
                     TrackFolderRequiringDash(originalName, foldersRequiringDash);
-                    string sanitizedName = SanitizeFolderName(originalName);
+                    string sanitizedName = FolderNameSanitizer.Sanitize(originalName);
                     if (!String.Equals(originalName, sanitizedName, StringComparison.Ordinal))
                     {
                         info["Name"] = sanitizedName;
@@ -586,17 +520,13 @@ namespace MetadataFilesMerger
 
         private static void TrackFolderRequiringDash(string folderName, ISet<string> affectedFolders)
         {
-            if (!String.IsNullOrEmpty(folderName) &&
-                (folderName.IndexOf('/') >= 0 || folderName.IndexOf('\\') >= 0))
+            if (FolderNameSanitizer.RequiresDashReplacement(folderName))
                 affectedFolders.Add(folderName);
         }
 
-        private static string SanitizeFolderName(string value)
+        private ResolvedPathParts ResolvePathParts(string fullPath)
         {
-            return (value ?? String.Empty)
-                .Replace('_', '-')
-                .Replace('/', '-')
-                .Replace('\\', '-');
+            return _folderPathResolver.Resolve(fullPath);
         }
 
         private static bool PathPartsMatchFullPath(IEnumerable<string> pathParts, string fullPath)
@@ -615,18 +545,6 @@ namespace MetadataFilesMerger
         private static string NormalizePath(string path)
         {
             return (path ?? String.Empty).Trim();
-        }
-
-        private sealed class CommaFragment
-        {
-            public CommaFragment(string separator, string value)
-            {
-                Separator = separator;
-                Value = value;
-            }
-
-            public string Separator { get; private set; }
-            public string Value { get; private set; }
         }
 
         private static string GetRelativePath(string root, string file)

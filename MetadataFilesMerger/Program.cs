@@ -23,7 +23,9 @@ namespace MetadataFilesMerger
                 Console.WriteLine("  [4] Manage folder-start templates");
                 Console.WriteLine("  [5] Toggle template-only merge filter");
                 Console.WriteLine("  [6] Intelligent Folder Recognition");
-                Console.WriteLine("  [7] Exit");
+                Console.WriteLine("  [7] Inspect folder string");
+                Console.WriteLine("  [8] Export database folder paths");
+                Console.WriteLine("  [9] Exit");
                 Console.Write("\n  Select an option: ");
 
                 string choice = Console.ReadLine();
@@ -40,6 +42,10 @@ namespace MetadataFilesMerger
                 else if (choice == "6")
                     ConsoleUi.ManageFolderNameTraining(settings);
                 else if (choice == "7")
+                    ConsoleUi.InspectFolderString(settings);
+                else if (choice == "8")
+                    ConsoleUi.ExportDatabaseFolderPaths(settings);
+                else if (choice == "9")
                     return;
             }
         }

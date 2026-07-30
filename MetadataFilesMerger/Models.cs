@@ -67,4 +67,12 @@ namespace MetadataFilesMerger
         public int NamesContainingSlash { get; set; }
         public string ModelPath { get; set; }
     }
+
+    internal sealed class FolderHierarchyExportResult
+    {
+        public int SourceRows { get; set; }
+        public int ExportedPaths { get; set; }
+        public int MaximumLevels { get; set; }
+        public string OutputPath { get; set; }
+    }
 }

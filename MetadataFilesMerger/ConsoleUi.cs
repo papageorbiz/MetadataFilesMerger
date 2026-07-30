@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -184,6 +185,112 @@ namespace MetadataFilesMerger
                 else if (choice == "6")
                     ToggleFolderNameTraining(settings);
             }
+        }
+
+        public static void InspectFolderString(AppSettings settings)
+        {
+            DrawHeader();
+            Console.WriteLine("\n  INSPECT FOLDER STRING\n");
+            Console.WriteLine("  Paste a full folder path or folder name to see how it will be split.\n");
+
+            string value = PromptText("String", "");
+            if (String.IsNullOrWhiteSpace(value))
+                return;
+
+            FolderPathResolver resolver = new FolderPathResolver(settings, null);
+            string[] paths = new SecondaryPathParser(settings).Parse(value).ToArray();
+            if (paths.Length == 0)
+                paths = new[] { value.Trim() };
+
+            Console.WriteLine();
+            Console.WriteLine("  Paths       : {0:N0}", paths.Length);
+            for (int pathIndex = 0; pathIndex < paths.Length; pathIndex++)
+            {
+                ResolvedPathParts resolved = resolver.Resolve(paths[pathIndex]);
+                string[] parts = resolved.Parts
+                    .Where(part => !String.IsNullOrWhiteSpace(part))
+                    .Select(FolderNameSanitizer.Sanitize)
+                    .Distinct(StringComparer.Ordinal)
+                    .ToArray();
+
+                Console.WriteLine();
+                Console.WriteLine("  PATH {0}", pathIndex + 1);
+                Console.WriteLine("  Full path   : " + paths[pathIndex]);
+                Console.WriteLine("  Recognition: " + resolved.Source);
+                Console.WriteLine("  Parts       : {0:N0}", parts.Length);
+                for (int index = 0; index < parts.Length; index++)
+                    Console.WriteLine("  [{0}] {1}", index + 1, parts[index]);
+            }
+
+            Pause();
+        }
+
+        public static void ExportDatabaseFolderPaths(AppSettings settings)
+        {
+            DrawHeader();
+            Console.WriteLine("\n  EXPORT DATABASE FOLDER PATHS\n");
+            Console.WriteLine("  Uses the SQL Server settings from Intelligent Folder Recognition.\n");
+
+            string defaultPath = Path.Combine(
+                String.IsNullOrWhiteSpace(settings.OutputFolder)
+                    ? Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory)
+                    : settings.OutputFolder,
+                "folder-paths-" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".xlsx");
+            string outputPath = PromptText("Excel output path", defaultPath).Trim('"');
+            if (String.IsNullOrWhiteSpace(outputPath))
+                return;
+
+            FolderHierarchyExportService service = new FolderHierarchyExportService();
+            string validation = service.Validate(settings, outputPath);
+            if (validation != null)
+            {
+                WriteError("\n  " + validation);
+                Pause();
+                return;
+            }
+
+            TrainingProgress progress = new TrainingProgress();
+            using (CancellationTokenSource cancellation = new CancellationTokenSource())
+            {
+                ConsoleCancelEventHandler handler = delegate(object sender, ConsoleCancelEventArgs e)
+                {
+                    e.Cancel = true;
+                    cancellation.Cancel();
+                };
+                Console.CancelKeyPress += handler;
+                try
+                {
+                    Task<FolderHierarchyExportResult> task = Task.Run(
+                        delegate { return service.Export(settings, outputPath, progress, cancellation.Token); });
+                    int frame = 0;
+                    while (!task.IsCompleted)
+                    {
+                        Thread.Sleep(150);
+                        ShowTrainingProgress(progress, frame++);
+                    }
+                    FolderHierarchyExportResult result = task.GetAwaiter().GetResult();
+                    ShowTrainingProgress(progress, frame);
+                    Console.WriteLine("\n\n  EXPORT COMPLETE");
+                    Console.WriteLine("  Source rows : {0:N0}", result.SourceRows);
+                    Console.WriteLine("  Paths       : {0:N0}", result.ExportedPaths);
+                    Console.WriteLine("  Max levels  : {0:N0}", result.MaximumLevels);
+                    Console.WriteLine("  Excel file  : " + result.OutputPath);
+                }
+                catch (OperationCanceledException)
+                {
+                    WriteError("\n\n  Export was cancelled.");
+                }
+                catch (Exception ex)
+                {
+                    WriteError("\n\n  Export failed: " + ex.Message);
+                }
+                finally
+                {
+                    Console.CancelKeyPress -= handler;
+                }
+            }
+
+            Pause();
         }
 
         private static void ConfigureSqlTraining(AppSettings settings)
