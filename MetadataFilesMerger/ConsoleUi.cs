@@ -69,8 +69,10 @@ namespace MetadataFilesMerger
             while (!token.WaitHandle.WaitOne(250))
             {
                 double rate = s.Elapsed.TotalSeconds <= 0 ? 0 : s.Processed / s.Elapsed.TotalSeconds;
-                Console.Write("\r  Found {0:N0} │ Done {1:N0} │ Updated {2:N0} │ Skipped {3:N0} │ Errors {4:N0} │ {5:N0}/s   ",
-                    s.Discovered, s.Processed, s.Merged, s.Skipped, s.Errors, rate);
+                Console.Write("\r  Found {0:N0} │ Done {1:N0} │ Updated {2:N0} │ Errors {3:N0} │ Lookup {4:N0} │ Training {5:N0} │ Rules {6:N0} │ Lookup% {7:N1} │ {8:N0}/s   ",
+                    s.Discovered, s.Processed, s.Merged, s.Errors,
+                    s.LookupTableRecognitions, s.NameTrainingRecognitions, s.StandardRulesRecognitions,
+                    s.LookupHitRatio, rate);
             }
         }
 
@@ -79,6 +81,8 @@ namespace MetadataFilesMerger
             Console.WriteLine("\n\n  RUN COMPLETE");
             Console.WriteLine("  Processed : {0:N0}   Updated: {1:N0}   Unchanged: {2:N0}", s.Processed, s.Merged, s.Unchanged);
             Console.WriteLine("  Resumed   : {0:N0}   Errors : {1:N0}   Time     : {2}", s.Skipped, s.Errors, s.Elapsed.ToString(@"hh\:mm\:ss"));
+            Console.WriteLine("  Lookup    : {0:N0}   Training: {1:N0}   Rules    : {2:N0}   Lookup hit: {3:N1}%",
+                s.LookupTableRecognitions, s.NameTrainingRecognitions, s.StandardRulesRecognitions, s.LookupHitRatio);
             Console.WriteLine("  Log       : " + log);
         }
 

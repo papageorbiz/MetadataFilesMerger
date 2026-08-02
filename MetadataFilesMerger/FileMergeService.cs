@@ -71,7 +71,7 @@ namespace MetadataFilesMerger
                 {
                     try
                     {
-                        MergeOutcome outcome = MergeOne(item);
+                        MergeOutcome outcome = MergeOne(item, statistics);
                         statistics.Added(outcome.Changed);
                         if (outcome.Changed)
                             _logger.Info(item.PrimaryPath, "Merge successful: folder metadata was updated.");
@@ -99,7 +99,7 @@ namespace MetadataFilesMerger
             catch (OperationCanceledException) { }
         }
 
-        private MergeOutcome MergeOne(WorkItem item)
+        private MergeOutcome MergeOne(WorkItem item, MergeStatistics statistics)
         {
             MergeOutcome outcome = new MergeOutcome();
             string destination = Path.Combine(_settings.OutputFolder, item.RelativePath);
@@ -154,6 +154,7 @@ namespace MetadataFilesMerger
                 foldersRequiringDash,
                 item.RelativePath,
                 addedPathSet,
+                statistics,
                 out pathsSanitized);
             primaryJson["FiledInFolders"] = paths.ToArray();
             changed = changed || pathsSanitized;
@@ -384,6 +385,7 @@ namespace MetadataFilesMerger
             ISet<string> foldersRequiringDash,
             string relativeFile,
             ISet<string> addedPaths,
+            MergeStatistics statistics,
             out bool changed)
         {
             changed = false;
@@ -414,7 +416,10 @@ namespace MetadataFilesMerger
                 }
 
                 if (isAddedPath)
-                    _logger.PathIdentification(relativeFile, normalizedPath, resolved.Source);
+                {
+                    RecognitionSnapshot snapshot = statistics.Recognized(resolved.Source);
+                    _logger.PathIdentification(relativeFile, normalizedPath, resolved.Source, snapshot);
+                }
 
                 foreach (string pathPart in pathParts)
                     TrackFolderRequiringDash(pathPart, foldersRequiringDash);

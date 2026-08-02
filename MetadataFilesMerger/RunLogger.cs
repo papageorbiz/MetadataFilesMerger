@@ -50,12 +50,16 @@ namespace MetadataFilesMerger
                 affectedFolders);
         }
 
-        public void PathIdentification(string fileName, string fullPath, string source)
+        public void PathIdentification(
+            string fileName,
+            string fullPath,
+            string source,
+            RecognitionSnapshot snapshot)
         {
             lock (_sync)
             {
                 string path = Path.Combine(Path.GetDirectoryName(LogPath), "path-identification-" + DateTime.Now.ToString("ddMMyyyy") + ".log");
-                EnsureTsvLogHeader(path, "Timestamp\tLevel\tEvent\tFile\tSource\tFullPath");
+                EnsureTsvLogHeader(path, PathIdentificationHeader);
                 using (StreamWriter writer = new StreamWriter(path, true, new UTF8Encoding(false)))
                 {
                     writer.Write(DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"));
@@ -68,7 +72,15 @@ namespace MetadataFilesMerger
                     writer.Write('\t');
                     writer.Write(EscapeTabValue(source));
                     writer.Write('\t');
-                    writer.WriteLine(EscapeTabValue(fullPath));
+                    writer.Write(EscapeTabValue(fullPath));
+                    writer.Write('\t');
+                    writer.Write(snapshot == null ? 0 : snapshot.LookupTableRecognitions);
+                    writer.Write('\t');
+                    writer.Write(snapshot == null ? 0 : snapshot.NameTrainingRecognitions);
+                    writer.Write('\t');
+                    writer.Write(snapshot == null ? 0 : snapshot.StandardRulesRecognitions);
+                    writer.Write('\t');
+                    writer.WriteLine((snapshot == null ? 0 : snapshot.LookupHitRatio).ToString("F2", System.Globalization.CultureInfo.InvariantCulture));
                 }
             }
         }
@@ -125,9 +137,12 @@ namespace MetadataFilesMerger
                     "Timestamp\tLevel\tEvent\tFile\tFoldersRequiringDash");
                 EnsureTsvLogHeader(
                     Path.Combine(directory, "path-identification-" + DateTime.Now.ToString("ddMMyyyy") + ".log"),
-                    "Timestamp\tLevel\tEvent\tFile\tSource\tFullPath");
+                    PathIdentificationHeader);
             }
         }
+
+        private const string PathIdentificationHeader =
+            "Timestamp\tLevel\tEvent\tFile\tSource\tFullPath\tLookupTableCount\tNameTrainingCount\tStandardRulesCount\tLookupHitRatioPercent";
 
         private static void EnsureTsvLogHeader(string path, string header)
         {

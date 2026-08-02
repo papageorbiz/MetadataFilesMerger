@@ -6,6 +6,7 @@ namespace MetadataFilesMerger
     internal sealed class MergeStatistics
     {
         private long _discovered, _processed, _merged, _unchanged, _skipped, _errors;
+        private long _lookupTableRecognitions, _nameTrainingRecognitions, _standardRulesRecognitions;
         private readonly DateTime _started = DateTime.UtcNow;
 
         public long Discovered { get { return Interlocked.Read(ref _discovered); } }
@@ -14,12 +15,49 @@ namespace MetadataFilesMerger
         public long Unchanged { get { return Interlocked.Read(ref _unchanged); } }
         public long Skipped { get { return Interlocked.Read(ref _skipped); } }
         public long Errors { get { return Interlocked.Read(ref _errors); } }
+        public long LookupTableRecognitions { get { return Interlocked.Read(ref _lookupTableRecognitions); } }
+        public long NameTrainingRecognitions { get { return Interlocked.Read(ref _nameTrainingRecognitions); } }
+        public long StandardRulesRecognitions { get { return Interlocked.Read(ref _standardRulesRecognitions); } }
+        public long TotalRecognitions { get { return LookupTableRecognitions + NameTrainingRecognitions + StandardRulesRecognitions; } }
+        public double LookupHitRatio
+        {
+            get
+            {
+                long total = TotalRecognitions;
+                return total == 0 ? 0 : LookupTableRecognitions * 100.0 / total;
+            }
+        }
         public TimeSpan Elapsed { get { return DateTime.UtcNow - _started; } }
 
         public void Found() { Interlocked.Increment(ref _discovered); }
         public void Added(bool changed) { Interlocked.Increment(ref _processed); if (changed) Interlocked.Increment(ref _merged); else Interlocked.Increment(ref _unchanged); }
         public void Skip() { Interlocked.Increment(ref _skipped); }
         public void Error() { Interlocked.Increment(ref _errors); }
+        public RecognitionSnapshot Recognized(string source)
+        {
+            if (String.Equals(source, "Lookup Table", StringComparison.Ordinal))
+                Interlocked.Increment(ref _lookupTableRecognitions);
+            else if (String.Equals(source, "Name Training", StringComparison.Ordinal))
+                Interlocked.Increment(ref _nameTrainingRecognitions);
+            else
+                Interlocked.Increment(ref _standardRulesRecognitions);
+
+            return new RecognitionSnapshot
+            {
+                LookupTableRecognitions = LookupTableRecognitions,
+                NameTrainingRecognitions = NameTrainingRecognitions,
+                StandardRulesRecognitions = StandardRulesRecognitions,
+                LookupHitRatio = LookupHitRatio
+            };
+        }
+    }
+
+    internal sealed class RecognitionSnapshot
+    {
+        public long LookupTableRecognitions { get; set; }
+        public long NameTrainingRecognitions { get; set; }
+        public long StandardRulesRecognitions { get; set; }
+        public double LookupHitRatio { get; set; }
     }
 
     internal sealed class WorkItem
