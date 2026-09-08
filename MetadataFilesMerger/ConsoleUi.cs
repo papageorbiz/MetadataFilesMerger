@@ -18,7 +18,7 @@ namespace MetadataFilesMerger
             catch (IOException) { }
             Console.ForegroundColor = ConsoleColor.Cyan;
             Console.WriteLine("  ╔══════════════════════════════════════════════════════════════════╗");
-            Console.WriteLine("  ║                    METADATA FILES MERGER                         ║");
+            Console.WriteLine("  ║                    METADATA FILES MERGER v2.00                   ║");
             Console.WriteLine("  ║                                                                  ║");
             Console.WriteLine("  ╚══════════════════════════════════════════════════════════════════╝");
             Console.ResetColor();

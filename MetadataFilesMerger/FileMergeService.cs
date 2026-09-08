@@ -369,10 +369,10 @@ namespace MetadataFilesMerger
                     .Where(part => !String.IsNullOrWhiteSpace(part))
                     .Select(part => part.Trim())
                     .ToArray();
+                // Explicit boundaries that reproduce the path take precedence over date heuristics.
                 if (fullPath.Length > 0 &&
                     parts.Length > 0 &&
                     PathPartsMatchFullPath(parts, fullPath) &&
-                    !FolderNameModel.ContainsSplitDateLikeExpression(parts) &&
                     !result.ContainsKey(fullPath))
                     result.Add(fullPath, parts);
             }
@@ -467,9 +467,8 @@ namespace MetadataFilesMerger
                     : ResolvePathParts(originalFullPath);
                 if (originalParts != null &&
                     originalParts.Length > 0 &&
-                    ((!String.IsNullOrWhiteSpace(originalFullPath) &&
-                    !PathPartsMatchFullPath(originalParts, originalFullPath)) ||
-                    FolderNameModel.ContainsSplitDateLikeExpression(originalParts)))
+                    !String.IsNullOrWhiteSpace(originalFullPath) &&
+                    !PathPartsMatchFullPath(originalParts, originalFullPath))
                 {
                     originalParts = null;
                     pathPartsRecalculated = true;

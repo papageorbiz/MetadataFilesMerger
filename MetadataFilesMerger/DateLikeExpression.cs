@@ -31,6 +31,10 @@ namespace MetadataFilesMerger
             @"(?<!\d)\S*?\d{1,8}(?:[/-]\d{1,8}){1,3}\S*?(?!\d)",
             RegexOptions.Compiled);
 
+        private static readonly Regex SlashDateExpression = new Regex(
+            @"(?<![\p{L}\d])\d{1,4}/\d{1,2}/\d{1,4}(?![\p{L}\d])",
+            RegexOptions.Compiled);
+
         public static bool IsDateExpression(string value)
         {
             if (String.IsNullOrWhiteSpace(value))
@@ -67,16 +71,17 @@ namespace MetadataFilesMerger
 
             string candidate = value.Trim();
             int firstSlash = candidate.IndexOf('/');
-            foreach (Match match in NumericDateExpression.Matches(candidate))
+            foreach (Match match in SlashDateExpression.Matches(candidate))
             {
-                if (match.Index > firstSlash)
+                // Every slash in this candidate must belong to the date itself.
+                // Otherwise a valid date could consume unrelated parent/child folders.
+                if (match.Index > firstSlash ||
+                    match.Index + match.Length <= candidate.LastIndexOf('/'))
                     continue;
 
-                string expression = match.Value;
-                if (expression.IndexOf('/') >= 0 &&
-                    CountPrefixSlashesBeforeFirstDigit(expression) <= 1 &&
-                    HasNumericSeparatedRun(expression, '/', '-') &&
-                    !HasWhitespaceInsideMatch(candidate, match))
+                DateTime ignored;
+                if (DateTime.TryParseExact(match.Value, DateFormats,
+                    CultureInfo.InvariantCulture, DateTimeStyles.None, out ignored))
                     return true;
             }
             return false;
