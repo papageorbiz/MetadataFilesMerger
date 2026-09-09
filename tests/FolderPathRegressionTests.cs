@@ -73,6 +73,53 @@ internal static class FolderPathRegressionTests
                 infos = ((object[])merged["FiledInFoldersInfo"]).Cast<Dictionary<string, object>>().ToArray();
                 Equal(purchasing.Split('/'), ((object[])infos[0]["PathParts"]).Cast<string>());
 
+                // Database boundaries must survive final per-folder character replacement.
+                string[] databaseParts = {
+                    "Cabinet", "OPERATIONS DEPT", "VOYAGES", "ALIAI (AIA) MARE 6 INC.",
+                    "V 55 ST SHIPPING 24/12/2025", "AO: OPL FLUSHING 28-29/12"
+                };
+                string databasePath = String.Join("/", databaseParts);
+                var lookupPaths = new Dictionary<string, string[]>(StringComparer.OrdinalIgnoreCase) {
+                    { databasePath, databaseParts }
+                };
+                var lookup = (FolderPathLookup)Activator.CreateInstance(typeof(FolderPathLookup),
+                    BindingFlags.Instance | BindingFlags.NonPublic, null, new object[] { lookupPaths }, null);
+                var lookupService = new FileMergeService(settings, logger);
+                var resolver = (FolderPathResolver)typeof(FileMergeService)
+                    .GetField("_folderPathResolver", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .GetValue(lookupService);
+                typeof(FolderPathResolver).GetField("_folderPathLookup", BindingFlags.Instance | BindingFlags.NonPublic)
+                    .SetValue(resolver, lookup);
+                var resolved = resolver.Resolve(databasePath);
+                if (resolved.Source != "Lookup Table") throw new Exception("Database lookup was bypassed.");
+                Equal(databaseParts, resolved.Parts);
+                string[] expectedDatabaseParts = {
+                    "Cabinet", "OPERATIONS DEPT", "VOYAGES", "ALIAI (AIA) MARE 6 INC.",
+                    "V 55 ST SHIPPING 24-12-2025", "AO: OPL FLUSHING 28-29-12"
+                };
+                string expectedDatabasePath = String.Join("/", expectedDatabaseParts);
+                string missesBeforeLookup = ReadActiveLog(logger.LookupMissLogPath);
+                foreach (bool alreadyInPrimary in new[] { false, true })
+                {
+                    string primary = alreadyInPrimary
+                        ? serializer.Serialize(new { FiledInFolders = new[] { databasePath },
+                            FiledInFoldersInfo = new[] { Info(databasePath, databaseParts) } })
+                        : "{\"FiledInFolders\":[]}";
+                    merged = Merge(lookupService, settings, primary, serializer.Serialize(new {
+                        comments = new[] { new { value = "FiledInFolders: " + databasePath } }
+                    }));
+                    Equal(new[] { expectedDatabasePath }, ((object[])merged["FiledInFolders"]).Cast<string>());
+                    var info = (Dictionary<string, object>)((object[])merged["FiledInFoldersInfo"])[0];
+                    Equal(expectedDatabaseParts, ((object[])info["PathParts"]).Cast<string>());
+                    if ((string)info["FullPath"] != expectedDatabasePath ||
+                        (string)info["Name"] != expectedDatabaseParts.Last())
+                        throw new Exception("Database folder metadata was not sanitized consistently.");
+                    Equal(databaseParts, resolver.Resolve(databasePath).Parts);
+                }
+                Console.WriteLine("Database lookup: six levels preserved for existing and added paths; cache unchanged.");
+                if (ReadActiveLog(logger.LookupMissLogPath) != missesBeforeLookup)
+                    throw new Exception("Database hits were logged as misses.");
+
                 if (args.Length == 2)
                 {
                     string primary = File.ReadAllText(args[0]);
@@ -84,6 +131,26 @@ internal static class FolderPathRegressionTests
                     Console.WriteLine("User sample: all paths and folder metadata preserved.");
                 }
             }
+            string missLog;
+            using (var logger = new RunLogger(Path.Combine(root, "miss-logs")))
+            {
+                missLog = logger.LookupMissLogPath;
+                var service = new FileMergeService(settings, logger);
+                Merge(service, settings,
+                    "{\"FiledInFolders\":[\"Cabinet/A_B\",\"Cabinet/A_B\"]}",
+                    "{\"comments\":[{\"value\":\"FiledInFolders: Cabinet/Child\"}]}");
+            }
+            var missLines = File.ReadAllLines(missLog);
+            if (missLines.Length != 4 ||
+                !missLines[1].Contains("\tDatabaseLookupMiss\tsample.json\tCabinet/A_B\t") ||
+                !missLines[2].Contains("\tDatabaseLookupMiss\tsample.json\tCabinet/Child\t") ||
+                !missLines.Last().EndsWith("\tTotalPaths\t\t\t2"))
+                throw new Exception("Lookup miss log must contain original paths once per file and a final total.");
+            using (var logger = new RunLogger(Path.Combine(root, "empty-logs")))
+                missLog = logger.LookupMissLogPath;
+            if (!File.ReadAllLines(missLog).Last().EndsWith("\tTotalPaths\t\t\t0"))
+                throw new Exception("Empty lookup miss log must contain a zero total.");
+            Console.WriteLine("Lookup miss logs: primary/secondary paths, deduplication, database hits and totals passed.");
             Console.WriteLine("Folder path regression checks passed.");
             return 0;
         }
@@ -93,6 +160,13 @@ internal static class FolderPathRegressionTests
     private static object Info(string path, string[] parts)
     {
         return new { Name = parts.Last(), FullPath = path, PathParts = parts };
+    }
+
+    private static string ReadActiveLog(string path)
+    {
+        using (var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+        using (var reader = new StreamReader(stream))
+            return reader.ReadToEnd();
     }
 
     private static Dictionary<string, object> Merge(FileMergeService service, AppSettings settings, string primary, string secondary)

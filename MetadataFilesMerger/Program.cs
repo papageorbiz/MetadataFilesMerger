@@ -26,6 +26,7 @@ namespace MetadataFilesMerger
                 Console.WriteLine("  [7] Inspect folder string");
                 Console.WriteLine("  [8] Export database folder paths");
                 Console.WriteLine("  [9] Exit");
+                Console.WriteLine("  [10] Open latest database lookup misses log");
                 Console.Write("\n  Select an option: ");
 
                 string choice = Console.ReadLine();
@@ -47,6 +48,8 @@ namespace MetadataFilesMerger
                     ConsoleUi.ExportDatabaseFolderPaths(settings);
                 else if (choice == "9")
                     return;
+                else if (choice == "10")
+                    RunLogger.OpenLatestLookupMisses(settings.EffectiveLogFolder);
             }
         }
 

@@ -9,7 +9,11 @@ namespace MetadataFilesMerger
     {
         private readonly object _sync = new object();
         private readonly StreamWriter _writer;
+        private readonly StreamWriter _lookupMissWriter;
+        private long _lookupMissCount;
+        private bool _disposed;
         public string LogPath { get; private set; }
+        public string LookupMissLogPath { get; private set; }
 
         public RunLogger(string logDirectory)
         {
@@ -18,7 +22,23 @@ namespace MetadataFilesMerger
             _writer = new StreamWriter(LogPath, false, new UTF8Encoding(false), 65536);
             _writer.AutoFlush = true;
             EnsureDailyAuditLogs();
+            LookupMissLogPath = Path.Combine(logDirectory,
+                "database-lookup-misses-" + DateTime.Now.ToString("yyyyMMdd-HHmmss-fffffff") + ".log");
+            _lookupMissWriter = new StreamWriter(LookupMissLogPath, false, new UTF8Encoding(false));
+            _lookupMissWriter.AutoFlush = true;
+            _lookupMissWriter.WriteLine("Timestamp\tEvent\tFile\tFullPath\tTotalPaths");
             Info(null, "Run started");
+        }
+
+        public void DatabaseLookupMiss(string fileName, string fullPath)
+        {
+            lock (_sync)
+            {
+                _lookupMissWriter.WriteLine("{0}\tDatabaseLookupMiss\t{1}\t{2}\t",
+                    DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"),
+                    EscapeTabValue(fileName), EscapeTabValue(fullPath));
+                _lookupMissCount++;
+            }
         }
 
         public void Info(string file, string message) { Write("INFO", file, message, null); }
@@ -163,14 +183,41 @@ namespace MetadataFilesMerger
                 .Replace("\n", "\\n");
         }
 
-        public void Dispose() { lock (_sync) { _writer.Dispose(); } }
+        public void Dispose()
+        {
+            lock (_sync)
+            {
+                if (_disposed) return;
+                _disposed = true;
+                try
+                {
+                    _lookupMissWriter.WriteLine("{0}\tTotalPaths\t\t\t{1}",
+                        DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss.fff"), _lookupMissCount);
+                }
+                finally
+                {
+                    try { _lookupMissWriter.Dispose(); }
+                    finally { _writer.Dispose(); }
+                }
+            }
+        }
 
         public static void OpenLatest(string logDirectory)
+        {
+            OpenLatest(logDirectory, "merge-*.log");
+        }
+
+        public static void OpenLatestLookupMisses(string logDirectory)
+        {
+            OpenLatest(logDirectory, "database-lookup-misses-*.log");
+        }
+
+        private static void OpenLatest(string logDirectory, string pattern)
         {
             try
             {
                 if (!Directory.Exists(logDirectory)) throw new DirectoryNotFoundException("No log directory exists yet.");
-                string[] files = Directory.GetFiles(logDirectory, "merge-*.log");
+                string[] files = Directory.GetFiles(logDirectory, pattern);
                 if (files.Length == 0) throw new FileNotFoundException("No log file exists yet.");
                 Array.Sort(files, delegate(string left, string right)
                 {

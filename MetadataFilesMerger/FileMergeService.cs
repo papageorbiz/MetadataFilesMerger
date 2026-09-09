@@ -391,20 +391,23 @@ namespace MetadataFilesMerger
             changed = false;
             List<string> result = new List<string>();
             HashSet<string> unique = new HashSet<string>(StringComparer.Ordinal);
+            HashSet<string> loggedLookupMisses = new HashSet<string>(StringComparer.Ordinal);
             foreach (string path in paths)
             {
                 string normalizedPath = NormalizePath(path);
                 string[] pathParts;
-                ResolvedPathParts resolved = null;
+                ResolvedPathParts resolved = ResolvePathParts(normalizedPath);
+                if (normalizedPath.Length > 0 &&
+                    !String.Equals(resolved.Source, "Lookup Table", StringComparison.Ordinal) &&
+                    loggedLookupMisses.Add(normalizedPath))
+                    _logger.DatabaseLookupMiss(relativeFile, normalizedPath);
                 bool isAddedPath = addedPaths.Contains(normalizedPath);
                 if (isAddedPath || !knownPathParts.TryGetValue(normalizedPath, out pathParts))
                 {
-                    resolved = ResolvePathParts(normalizedPath);
                     pathParts = resolved.Parts;
                 }
                 else
                 {
-                    resolved = ResolvePathParts(normalizedPath);
                     if (String.Equals(resolved.Source, "Lookup Table", StringComparison.Ordinal))
                     {
                         pathParts = resolved.Parts;
