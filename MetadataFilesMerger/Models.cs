@@ -7,7 +7,9 @@ namespace MetadataFilesMerger
     {
         private long _discovered, _processed, _merged, _unchanged, _skipped, _errors;
         private long _lookupTableRecognitions, _nameTrainingRecognitions, _standardRulesRecognitions;
+        private long _pathsChecked, _databasePathsIdentified, _algorithmPathsManaged;
         private readonly DateTime _started = DateTime.UtcNow;
+        private long _completedTicks;
 
         public long Discovered { get { return Interlocked.Read(ref _discovered); } }
         public long Processed { get { return Interlocked.Read(ref _processed); } }
@@ -18,6 +20,18 @@ namespace MetadataFilesMerger
         public long LookupTableRecognitions { get { return Interlocked.Read(ref _lookupTableRecognitions); } }
         public long NameTrainingRecognitions { get { return Interlocked.Read(ref _nameTrainingRecognitions); } }
         public long StandardRulesRecognitions { get { return Interlocked.Read(ref _standardRulesRecognitions); } }
+        public long PathsChecked { get { return Interlocked.Read(ref _pathsChecked); } }
+        public long DatabasePathsIdentified { get { return Interlocked.Read(ref _databasePathsIdentified); } }
+        public long AlgorithmPathsManaged { get { return Interlocked.Read(ref _algorithmPathsManaged); } }
+        public DateTime StartedUtc { get { return _started; } }
+        public DateTime EndedUtc
+        {
+            get
+            {
+                long ticks = Interlocked.Read(ref _completedTicks);
+                return ticks == 0 ? DateTime.UtcNow : new DateTime(ticks, DateTimeKind.Utc);
+            }
+        }
         public long TotalRecognitions { get { return LookupTableRecognitions + NameTrainingRecognitions + StandardRulesRecognitions; } }
         public double LookupHitRatio
         {
@@ -33,6 +47,18 @@ namespace MetadataFilesMerger
         public void Added(bool changed) { Interlocked.Increment(ref _processed); if (changed) Interlocked.Increment(ref _merged); else Interlocked.Increment(ref _unchanged); }
         public void Skip() { Interlocked.Increment(ref _skipped); }
         public void Error() { Interlocked.Increment(ref _errors); }
+        public void PathChecked(string source)
+        {
+            Interlocked.Increment(ref _pathsChecked);
+            if (String.Equals(source, "Lookup Table", StringComparison.Ordinal))
+                Interlocked.Increment(ref _databasePathsIdentified);
+            else
+                Interlocked.Increment(ref _algorithmPathsManaged);
+        }
+        public void Complete()
+        {
+            Interlocked.CompareExchange(ref _completedTicks, DateTime.UtcNow.Ticks, 0);
+        }
         public RecognitionSnapshot Recognized(string source)
         {
             if (String.Equals(source, "Lookup Table", StringComparison.Ordinal))

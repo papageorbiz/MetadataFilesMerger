@@ -151,6 +151,29 @@ internal static class FolderPathRegressionTests
             if (!File.ReadAllLines(missLog).Last().EndsWith("\tTotalPaths\t\t\t0"))
                 throw new Exception("Empty lookup miss log must contain a zero total.");
             Console.WriteLine("Lookup miss logs: primary/secondary paths, deduplication, database hits and totals passed.");
+
+            string statisticsLog;
+            var runStatistics = new MergeStatistics();
+            runStatistics.Found();
+            runStatistics.Added(true);
+            runStatistics.PathChecked("Lookup Table");
+            runStatistics.PathChecked("Standard Rules");
+            runStatistics.Complete();
+            using (var logger = new RunLogger(Path.Combine(root, "statistics-logs")))
+            {
+                logger.WriteStatistics(runStatistics);
+                statisticsLog = logger.StatisticsLogPath;
+            }
+            string statisticsText = File.ReadAllText(statisticsLog);
+            if (!Path.GetFileName(statisticsLog).StartsWith("statistics-") ||
+                !statisticsText.Contains("JSON files processed            : 1") ||
+                !statisticsText.Contains("Total paths checked             : 2") ||
+                !statisticsText.Contains("Identified in database          : 1") ||
+                !statisticsText.Contains("Managed by application algorithms: 1") ||
+                !statisticsText.Contains("Started                         : ") ||
+                !statisticsText.Contains("Ended                           : "))
+                throw new Exception("The final statistics log is missing required user-facing totals.");
+            Console.WriteLine("Final statistics log: required totals and dates passed.");
             Console.WriteLine("Folder path regression checks passed.");
             return 0;
         }

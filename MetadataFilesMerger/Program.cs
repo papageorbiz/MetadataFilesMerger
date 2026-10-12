@@ -76,7 +76,7 @@ namespace MetadataFilesMerger
                 {
                     FileMergeService service = new FileMergeService(settings, logger);
                     MergeStatistics result = service.Run(cancellation.Token);
-                    ConsoleUi.ShowFinalStatistics(result, logger.LogPath);
+                    ConsoleUi.ShowFinalStatistics(result, logger.LogPath, logger.StatisticsLogPath);
                 }
                 catch (Exception ex)
                 {

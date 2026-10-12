@@ -18,7 +18,7 @@ namespace MetadataFilesMerger
             catch (IOException) { }
             Console.ForegroundColor = ConsoleColor.Cyan;
             Console.WriteLine("  ╔══════════════════════════════════════════════════════════════════╗");
-            Console.WriteLine("  ║                    METADATA FILES MERGER v2.01                   ║");
+            Console.WriteLine("  ║                    METADATA FILES MERGER v2.02                   ║");
             Console.WriteLine("  ║                                                                  ║");
             Console.WriteLine("  ╚══════════════════════════════════════════════════════════════════╝");
             Console.ResetColor();
@@ -76,7 +76,7 @@ namespace MetadataFilesMerger
             }
         }
 
-        public static void ShowFinalStatistics(MergeStatistics s, string log)
+        public static void ShowFinalStatistics(MergeStatistics s, string log, string statisticsLog)
         {
             Console.WriteLine("\n\n  RUN COMPLETE");
             Console.WriteLine("  Processed : {0:N0}   Updated: {1:N0}   Unchanged: {2:N0}", s.Processed, s.Merged, s.Unchanged);
@@ -84,6 +84,7 @@ namespace MetadataFilesMerger
             Console.WriteLine("  Lookup    : {0:N0}   Training: {1:N0}   Rules    : {2:N0}   Lookup hit: {3:N1}%",
                 s.LookupTableRecognitions, s.NameTrainingRecognitions, s.StandardRulesRecognitions, s.LookupHitRatio);
             Console.WriteLine("  Log       : " + log);
+            Console.WriteLine("  Statistics: " + statisticsLog);
         }
 
         public static void ManageFolderStartPatterns(AppSettings settings)

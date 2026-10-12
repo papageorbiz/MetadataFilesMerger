@@ -60,6 +60,8 @@ namespace MetadataFilesMerger
             }
             _logger.Info(null, String.Format("Run finished. Processed={0}, merged={1}, unchanged={2}, skipped={3}, errors={4}",
                 statistics.Processed, statistics.Merged, statistics.Unchanged, statistics.Skipped, statistics.Errors));
+            statistics.Complete();
+            _logger.WriteStatistics(statistics);
             return statistics;
         }
 
@@ -397,6 +399,8 @@ namespace MetadataFilesMerger
                 string normalizedPath = NormalizePath(path);
                 string[] pathParts;
                 ResolvedPathParts resolved = ResolvePathParts(normalizedPath);
+                if (normalizedPath.Length > 0)
+                    statistics.PathChecked(resolved.Source);
                 if (normalizedPath.Length > 0 &&
                     !String.Equals(resolved.Source, "Lookup Table", StringComparison.Ordinal) &&
                     loggedLookupMisses.Add(normalizedPath))

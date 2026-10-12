@@ -14,6 +14,7 @@ namespace MetadataFilesMerger
         private bool _disposed;
         public string LogPath { get; private set; }
         public string LookupMissLogPath { get; private set; }
+        public string StatisticsLogPath { get; private set; }
 
         public RunLogger(string logDirectory)
         {
@@ -43,6 +44,48 @@ namespace MetadataFilesMerger
 
         public void Info(string file, string message) { Write("INFO", file, message, null); }
         public void Error(string file, string message, Exception ex) { Write("ERROR", file, message, ex); }
+
+        public void WriteStatistics(MergeStatistics statistics)
+        {
+            if (statistics == null) throw new ArgumentNullException("statistics");
+
+            lock (_sync)
+            {
+                StatisticsLogPath = Path.Combine(
+                    Path.GetDirectoryName(LogPath),
+                    "statistics-" + DateTime.Now.ToString("yyyyMMdd-HHmmss-fffffff") + ".log");
+
+                using (StreamWriter writer = new StreamWriter(StatisticsLogPath, false, new UTF8Encoding(false)))
+                {
+                    DateTime started = statistics.StartedUtc.ToLocalTime();
+                    DateTime ended = statistics.EndedUtc.ToLocalTime();
+                    writer.WriteLine("============================================================");
+                    writer.WriteLine("                 PROCESS STATISTICS");
+                    writer.WriteLine("============================================================");
+                    writer.WriteLine();
+                    writer.WriteLine("PROCESS TIME");
+                    writer.WriteLine("  Started                         : {0}", started.ToString("yyyy-MM-dd HH:mm:ss zzz"));
+                    writer.WriteLine("  Ended                           : {0}", ended.ToString("yyyy-MM-dd HH:mm:ss zzz"));
+                    writer.WriteLine("  Duration                        : {0}", (ended - started).ToString(@"hh\:mm\:ss"));
+                    writer.WriteLine();
+                    writer.WriteLine("FILES");
+                    writer.WriteLine("  JSON files processed            : {0:N0}", statistics.Processed);
+                    writer.WriteLine();
+                    writer.WriteLine("PATH IDENTIFICATION");
+                    writer.WriteLine("  Total paths checked             : {0:N0}", statistics.PathsChecked);
+                    writer.WriteLine("  Identified in database          : {0:N0}", statistics.DatabasePathsIdentified);
+                    writer.WriteLine("  Managed by application algorithms: {0:N0}", statistics.AlgorithmPathsManaged);
+                    writer.WriteLine();
+                    writer.WriteLine("RESULT");
+                    writer.WriteLine("  JSON files updated              : {0:N0}", statistics.Merged);
+                    writer.WriteLine("  JSON files unchanged            : {0:N0}", statistics.Unchanged);
+                    writer.WriteLine("  JSON files skipped/resumed      : {0:N0}", statistics.Skipped);
+                    writer.WriteLine("  Errors                          : {0:N0}", statistics.Errors);
+                    writer.WriteLine();
+                    writer.WriteLine("============================================================");
+                }
+            }
+        }
 
         public void SednaMerge(string secondaryFile, int mergedEntries)
         {
