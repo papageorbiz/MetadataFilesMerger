@@ -29,22 +29,24 @@ namespace MetadataFilesMerger
             foreach (CommaFragment commaFragment in SplitCommaFragments(text))
             {
                 string fragment = NormalizePath(commaFragment.Value);
-                if (fragment.Length == 0) continue;
+                if (fragment.Length == 0 && String.IsNullOrEmpty(currentPath)) continue;
 
                 if (IsSecondaryPathStart(fragment))
                 {
                     if (!String.IsNullOrEmpty(currentPath))
-                        yield return currentPath;
-                    currentPath = fragment;
+                        yield return NormalizePath(currentPath);
+                    currentPath = commaFragment.Value.TrimStart();
                 }
                 else if (!String.IsNullOrEmpty(currentPath))
                 {
-                    currentPath += commaFragment.Separator + fragment;
+                    // Trim only the completed path; whitespace beside an internal comma
+                    // belongs to the folder name and is significant for database lookup.
+                    currentPath += commaFragment.Separator + commaFragment.Value;
                 }
             }
 
             if (!String.IsNullOrEmpty(currentPath))
-                yield return currentPath;
+                yield return NormalizePath(currentPath);
         }
 
         private bool IsSecondaryPathStart(string fragment)

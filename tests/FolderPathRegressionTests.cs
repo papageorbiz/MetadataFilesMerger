@@ -45,6 +45,35 @@ internal static class FolderPathRegressionTests
             {
                 var service = new FileMergeService(settings, logger);
                 var serializer = new JavaScriptSerializer();
+                string corkName = "DP: CORK , WHITEGATE, IRELAND 25/9 GRAYPEN";
+                string[] corkParts = {
+                    "Cabinet", "OPERATIONS DEPT", "VOYAGES", "ARISTEA", "VOYS 2018 - 2025",
+                    "2025 Voys 79-91", "V 88 (82)", corkName
+                };
+                string corkPath = String.Join("/", corkParts);
+                var parser = new SecondaryPathParser(settings);
+                Equal(new[] { corkPath, "Smart folder/OPS ALL" },
+                    parser.Parse("FiledInFolders: " + corkPath + ", Smart folder/OPS ALL"));
+                Equal(new[] { "Cabinet/A , B ,  C,, D", "Smart folder/OPS ALL" },
+                    parser.Parse("FiledInFolders: Cabinet/A , B ,  C,, D, Smart folder/OPS ALL  "));
+                var corkInfo = new Dictionary<string, object> {
+                    { "Gid", "93efa0ac-eeb0-43d9-af96-f1985b1ed56e" },
+                    { "Name", corkName }, { "FullPath", corkPath }, { "PathParts", corkParts }
+                };
+                var corkMerged = Merge(service, settings,
+                    serializer.Serialize(new { FiledInFolders = new[] { corkPath }, FiledInFoldersInfo = new[] { corkInfo } }),
+                    serializer.Serialize(new { comments = new[] { new { value = "FiledInFolders: " + corkPath } } }));
+                string[] sanitizedCorkParts = corkParts.Select(FolderNameSanitizer.Sanitize).ToArray();
+                Equal(new[] { String.Join("/", sanitizedCorkParts) }, ((object[])corkMerged["FiledInFolders"]).Cast<string>());
+                var corkInfos = (object[])corkMerged["FiledInFoldersInfo"];
+                if (corkInfos.Length != 1) throw new Exception("Cork folder was duplicated.");
+                var mergedCorkInfo = (Dictionary<string, object>)corkInfos[0];
+                if ((string)mergedCorkInfo["Gid"] != (string)corkInfo["Gid"] ||
+                    (string)mergedCorkInfo["Name"] != sanitizedCorkParts.Last() ||
+                    (string)mergedCorkInfo["FullPath"] != String.Join("/", sanitizedCorkParts))
+                    throw new Exception("Cork folder identity or metadata changed unexpectedly.");
+                Equal(sanitizedCorkParts, ((object[])mergedCorkInfo["PathParts"]).Cast<string>());
+                Console.WriteLine("Comma spacing: preserved; Cork folder merged once with original Gid and eight levels.");
                 // Explicit numeric folder levels must remain separate even if they resemble a date.
                 string explicitPath = "Cabinet/24/01/2024";
                 var original = new Dictionary<string, object> {
